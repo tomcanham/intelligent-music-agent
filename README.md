@@ -47,7 +47,7 @@ The agent uses SQLite to store:
 
 1. **Clone and Setup**:
    ```bash
-   git clone https://github.com/your-username/intelligent-music-agent
+   git clone https://github.com/tomcanham/intelligent-music-agent
    cd intelligent-music-agent
    ./setup_env.sh
    ```
@@ -85,7 +85,7 @@ The agent uses SQLite to store:
 
 #### Option 1: Automated Setup (Recommended)
 ```bash
-git clone https://github.com/your-username/intelligent-music-agent
+git clone https://github.com/tomcanham/intelligent-music-agent
 cd intelligent-music-agent
 ./setup_env.sh
 ```
@@ -446,7 +446,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 If you encounter issues or have questions:
 
-1. Check the [Issues](https://github.com/your-username/intelligent-music-agent/issues) page
+1. Check the [Issues](https://github.com/tomcanham/intelligent-music-agent/issues) page
 2. Review the [Documentation](README.md)
 3. Enable debug mode for detailed logs
 4. Create a new issue with:
