@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Music agent runtime files
+.music_agent.sock
+.music_agent.db
+.music_agent.log
+
+# Environment variables
+.env
+.env.local
+
+# Cache and temporary files
+.cache
+*.tmp
+*.temp
+
+# Logs
+*.log
+logs/
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt

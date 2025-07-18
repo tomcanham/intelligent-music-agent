@@ -1,0 +1,62 @@
+#!/bin/bash
+# Music Agent Convenience Wrapper
+# Automatically activates the virtual environment and runs music commands
+
+VENV_PATH="/Users/tom/src/heck/.venv"
+SCRIPT_DIR="/Users/tom/scripts/slack"
+
+# Function to run with venv
+run_with_venv() {
+    source "$VENV_PATH/bin/activate" && cd "$SCRIPT_DIR" && "$@"
+}
+
+# Check if daemon is running
+check_daemon() {
+    if ! run_with_venv python3 music_daemon.py --status >/dev/null 2>&1; then
+        echo "🚀 Starting music daemon..."
+        run_with_venv python3 music_daemon.py --daemon
+        sleep 2
+        echo "✅ Music daemon started"
+    fi
+}
+
+# Main command handling
+case "$1" in
+    "start")
+        echo "🚀 Starting music daemon..."
+        run_with_venv python3 music_daemon.py --daemon
+        ;;
+    "stop")
+        echo "⏹️  Stopping music daemon..."
+        run_with_venv python3 music_daemon.py --stop
+        ;;
+    "status")
+        run_with_venv python3 music_daemon.py --status
+        ;;
+    "restart")
+        echo "🔄 Restarting music daemon..."
+        run_with_venv python3 music_daemon.py --stop
+        sleep 2
+        run_with_venv python3 music_daemon.py --daemon
+        ;;
+    "")
+        echo "🎵 Music Agent Commands:"
+        echo "  music start       - Start the daemon"
+        echo "  music stop        - Stop the daemon"
+        echo "  music status      - Show daemon status"
+        echo "  music restart     - Restart the daemon"
+        echo "  music '<command>' - Send music command"
+        echo ""
+        echo "🎶 Music Commands:"
+        echo "  music 'play bohemian rhapsody'"
+        echo "  music 'what's playing'"
+        echo "  music 'play me some pink floyd'"
+        echo "  music 'play some mellow music'"
+        echo "  music 'search for stairway to heaven'"
+        ;;
+    *)
+        # Any other command is assumed to be a music command
+        check_daemon
+        run_with_venv python3 music_client.py "$@"
+        ;;
+esac
