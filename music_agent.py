@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/Users/tom/scripts/slack/music_env/bin/python3
 """
 Comprehensive Music Agent
 Combines web search, AppleScript control, and all learned strategies for robust music handling
@@ -7,6 +7,10 @@ Combines web search, AppleScript control, and all learned strategies for robust 
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import subprocess
+try:
+    from spotify_oauth import SpotifyAuth
+except ImportError:
+    SpotifyAuth = None
 import os
 import json
 import time
@@ -84,6 +88,42 @@ class MusicDatabase:
                         spotify_uri TEXT,
                         confidence REAL DEFAULT 1.0,
                         added_date TEXT NOT NULL
+                    )
+                ''')
+                
+                # Table for playlists
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS playlists (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        spotify_id TEXT UNIQUE NOT NULL,
+                        name TEXT NOT NULL,
+                        description TEXT,
+                        owner_id TEXT,
+                        owner_name TEXT,
+                        is_public BOOLEAN DEFAULT 0,
+                        is_collaborative BOOLEAN DEFAULT 0,
+                        track_count INTEGER DEFAULT 0,
+                        spotify_uri TEXT,
+                        last_synced TEXT NOT NULL,
+                        added_date TEXT NOT NULL
+                    )
+                ''')
+                
+                # Table for playlist tracks
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS playlist_tracks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        playlist_id INTEGER NOT NULL,
+                        spotify_track_id TEXT NOT NULL,
+                        track_name TEXT NOT NULL,
+                        artist_name TEXT NOT NULL,
+                        album_name TEXT,
+                        spotify_uri TEXT NOT NULL,
+                        duration_ms INTEGER,
+                        added_at TEXT NOT NULL,
+                        track_position INTEGER NOT NULL,
+                        FOREIGN KEY (playlist_id) REFERENCES playlists (id),
+                        UNIQUE(playlist_id, spotify_track_id)
                     )
                 ''')
                 
@@ -299,6 +339,212 @@ class MusicDatabase:
         except Exception as e:
             print(f"❌ Error getting preference: {e}")
             return default
+    
+    # Playlist management methods
+    def store_playlist(self, playlist_data: Dict[str, Any]) -> bool:
+        """Store a playlist in the database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Insert or update playlist
+                cursor.execute('''
+                    INSERT OR REPLACE INTO playlists 
+                    (spotify_id, name, description, owner_id, owner_name, is_public, 
+                     is_collaborative, track_count, spotify_uri, last_synced, added_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 
+                            COALESCE((SELECT added_date FROM playlists WHERE spotify_id = ?), datetime('now')))
+                ''', (
+                    playlist_data['id'],
+                    playlist_data['name'],
+                    playlist_data.get('description', ''),
+                    playlist_data['owner']['id'],
+                    playlist_data['owner']['display_name'] or playlist_data['owner']['id'],
+                    playlist_data.get('public', False),
+                    playlist_data.get('collaborative', False),
+                    playlist_data['tracks']['total'],
+                    playlist_data['uri'],
+                    playlist_data['id']  # For the COALESCE check
+                ))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            print(f"❌ Error storing playlist: {e}")
+            return False
+    
+    def store_playlist_tracks(self, playlist_id: str, tracks: List[Dict[str, Any]]) -> bool:
+        """Store tracks for a playlist"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get the database playlist ID
+                cursor.execute('SELECT id FROM playlists WHERE spotify_id = ?', (playlist_id,))
+                result = cursor.fetchone()
+                if not result:
+                    print(f"❌ Playlist {playlist_id} not found in database")
+                    return False
+                
+                db_playlist_id = result[0]
+                
+                # Clear existing tracks for this playlist
+                cursor.execute('DELETE FROM playlist_tracks WHERE playlist_id = ?', (db_playlist_id,))
+                
+                # Insert new tracks
+                for position, item in enumerate(tracks):
+                    track = item['track']
+                    if track:  # Some tracks might be None (removed tracks)
+                        cursor.execute('''
+                            INSERT OR IGNORE INTO playlist_tracks 
+                            (playlist_id, spotify_track_id, track_name, artist_name, album_name, 
+                             spotify_uri, duration_ms, added_at, track_position)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            db_playlist_id,
+                            track['id'],
+                            track['name'],
+                            track['artists'][0]['name'] if track['artists'] else 'Unknown',
+                            track['album']['name'] if track.get('album') else 'Unknown',
+                            track['uri'],
+                            track.get('duration_ms', 0),
+                            item['added_at'],
+                            position
+                        ))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            print(f"❌ Error storing playlist tracks: {e}")
+            return False
+    
+    def get_playlists(self, owner_only: bool = True) -> List[Dict[str, Any]]:
+        """Get stored playlists"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                if owner_only:
+                    # This would need the current user's ID - for now, get all
+                    query = '''
+                        SELECT spotify_id, name, description, owner_name, track_count, 
+                               spotify_uri, last_synced, is_public, is_collaborative
+                        FROM playlists
+                        ORDER BY name
+                    '''
+                    cursor.execute(query)
+                else:
+                    cursor.execute('''
+                        SELECT spotify_id, name, description, owner_name, track_count, 
+                               spotify_uri, last_synced, is_public, is_collaborative
+                        FROM playlists
+                        ORDER BY name
+                    ''')
+                
+                return [{
+                    'spotify_id': row[0],
+                    'name': row[1],
+                    'description': row[2],
+                    'owner_name': row[3],
+                    'track_count': row[4],
+                    'spotify_uri': row[5],
+                    'last_synced': row[6],
+                    'is_public': bool(row[7]),
+                    'is_collaborative': bool(row[8])
+                } for row in cursor.fetchall()]
+                
+        except Exception as e:
+            print(f"❌ Error getting playlists: {e}")
+            return []
+    
+    def find_playlist_by_name(self, name: str, fuzzy: bool = True) -> Optional[Dict[str, Any]]:
+        """Find a playlist by name (exact or fuzzy match)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Try exact match first
+                cursor.execute('''
+                    SELECT spotify_id, name, description, owner_name, track_count, 
+                           spotify_uri, last_synced
+                    FROM playlists
+                    WHERE LOWER(name) = LOWER(?)
+                    LIMIT 1
+                ''', (name,))
+                
+                result = cursor.fetchone()
+                if result:
+                    return {
+                        'spotify_id': result[0],
+                        'name': result[1],
+                        'description': result[2],
+                        'owner_name': result[3],
+                        'track_count': result[4],
+                        'spotify_uri': result[5],
+                        'last_synced': result[6]
+                    }
+                
+                # Try fuzzy match if enabled
+                if fuzzy:
+                    cursor.execute('''
+                        SELECT spotify_id, name, description, owner_name, track_count, 
+                               spotify_uri, last_synced
+                        FROM playlists
+                        WHERE LOWER(name) LIKE LOWER(?)
+                        ORDER BY LENGTH(name)
+                        LIMIT 1
+                    ''', (f'%{name}%',))
+                    
+                    result = cursor.fetchone()
+                    if result:
+                        return {
+                            'spotify_id': result[0],
+                            'name': result[1],
+                            'description': result[2],
+                            'owner_name': result[3],
+                            'track_count': result[4],
+                            'spotify_uri': result[5],
+                            'last_synced': result[6]
+                        }
+                
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error finding playlist: {e}")
+            return None
+    
+    def get_playlist_tracks(self, playlist_name: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get tracks from a playlist by name"""
+        try:
+            playlist = self.find_playlist_by_name(playlist_name)
+            if not playlist:
+                return []
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT pt.track_name, pt.artist_name, pt.album_name, pt.spotify_uri, pt.duration_ms
+                    FROM playlist_tracks pt
+                    JOIN playlists p ON pt.playlist_id = p.id
+                    WHERE p.spotify_id = ?
+                    ORDER BY pt.track_position
+                    LIMIT ?
+                ''', (playlist['spotify_id'], limit))
+                
+                return [{
+                    'name': row[0],
+                    'artist': row[1],
+                    'album': row[2],
+                    'uri': row[3],
+                    'duration_ms': row[4]
+                } for row in cursor.fetchall()]
+                
+        except Exception as e:
+            print(f"❌ Error getting playlist tracks: {e}")
+            return []
 
 class ComprehensiveMusicAgent:
     """
@@ -318,6 +564,21 @@ class ComprehensiveMusicAgent:
     def setup_spotify_connection(self):
         """Set up Spotify API connection with proper error handling"""
         try:
+            # Try OAuth first (provides full API access)
+            if SpotifyAuth:
+                try:
+                    auth = SpotifyAuth()
+                    is_valid, message = auth.check_auth_status()
+                    if is_valid:
+                        self.sp = auth.get_spotify_client()
+                        print("✅ Spotify OAuth connection established (full API access)")
+                        return
+                    else:
+                        print(f"⚠️  OAuth not available: {message}")
+                except Exception as e:
+                    print(f"⚠️  OAuth failed: {e}")
+            
+            # Fallback to Client Credentials (limited access)
             client_id = os.getenv('SPOTIFY_CLIENT_ID')
             client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
             
@@ -327,7 +588,7 @@ class ComprehensiveMusicAgent:
             
             auth_manager = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
             self.sp = spotipy.Spotify(auth_manager=auth_manager)
-            print("✅ Spotify connection established")
+            print("✅ Spotify Client Credentials connection established (limited API access)")
             
         except Exception as e:
             print(f"❌ Error setting up Spotify connection: {e}")
@@ -610,6 +871,194 @@ class ComprehensiveMusicAgent:
             print(f"❌ Playback verification failed: {current.get('status', 'Unknown')}")
             return False
     
+    def play_playlist_by_name(self, playlist_name: str) -> bool:
+        """Play a playlist by name from local database"""
+        print(f"🔍 Looking for playlist: '{playlist_name}'")
+        
+        # First, try to find the playlist in our database
+        playlist = self.db.find_playlist_by_name(playlist_name)
+        if playlist:
+            print(f"✅ Found playlist: '{playlist['name']}' ({playlist['track_count']} tracks)")
+            
+            # Play the playlist using its Spotify URI
+            script = f'tell application "Spotify" to play track "{playlist['spotify_uri']}"'
+            result = self.run_applescript(script)
+            
+            if "❌" not in result:
+                time.sleep(3)  # Give it time to start
+                current = self.get_current_track()
+                if current.get("status") == "playing":
+                    print(f"🎵 Now playing from playlist: {playlist['name']}")
+                    return True
+        
+        # Fallback to searching Spotify directly
+        return self.play_artist_collection(playlist_name)
+    
+    def play_random_from_playlist(self, playlist_name: str) -> bool:
+        """Play a random track from a playlist"""
+        print(f"🎲 Looking for random track from playlist: '{playlist_name}'")
+        
+        tracks = self.db.get_playlist_tracks(playlist_name, limit=100)
+        if not tracks:
+            print(f"❌ No tracks found in playlist '{playlist_name}'")
+            return False
+        
+        import random
+        track = random.choice(tracks)
+        
+        print(f"🎲 Selected: {track['name']} by {track['artist']}")
+        success = self.play_track(track['uri'])
+        
+        if success:
+            # Log the play
+            self.db.log_play_history(track['name'], track['artist'], track['album'], track['uri'])
+            return True
+        
+        return False
+    
+    def shuffle_liked_songs(self) -> bool:
+        """Shuffle play liked songs from Spotify"""
+        if not self.sp:
+            return False
+
+        print("🔀 Shuffling liked songs...")
+
+        try:
+            # Get the user's liked songs
+            results = self.sp.current_user_saved_tracks(limit=50)
+            if not results['items']:
+                print("❌ No liked songs found")
+                return False
+
+            import random
+            track = random.choice(results['items'])['track']
+            print(f"🔀 Selected: {track['name']} by {track['artists'][0]['name']}")
+            
+            success = self.play_track(track['uri'])
+
+            if success:
+                # Log the play
+                self.db.log_play_history(track['name'], track['artists'][0]['name'], track['album']['name'], track['uri'])
+                return True
+
+        except Exception as e:
+            print(f"❌ Error accessing liked songs: {e}")
+
+        return False
+
+    def shuffle_playlist_by_name(self, playlist_name: str) -> bool:
+        """Shuffle play a playlist by name"""
+        print(f"🔀 Looking for playlist to shuffle: '{playlist_name}'")
+        
+        # First, try to find the playlist in our database
+        playlist = self.db.find_playlist_by_name(playlist_name)
+        if playlist:
+            print(f"✅ Found playlist: '{playlist['name']}' ({playlist['track_count']} tracks)")
+            
+            # Play the playlist using its Spotify URI
+            script = f'tell application "Spotify" to play track "{playlist['spotify_uri']}"'
+            result = self.run_applescript(script)
+            
+            if "❌" not in result:
+                time.sleep(3)  # Give it time to start
+                
+                # Turn on shuffle mode
+                shuffle_script = 'tell application "Spotify" to set shuffling to true'
+                shuffle_result = self.run_applescript(shuffle_script)
+                
+                current = self.get_current_track()
+                if current.get("status") == "playing":
+                    print(f"🔀 Now shuffling playlist: {playlist['name']}")
+                    return True
+        
+        return False
+
+    def list_playlists(self) -> str:
+        """List available playlists"""
+        playlists = self.db.get_playlists()
+        
+        if not playlists:
+            return "📭 No playlists stored locally. Run 'python3 sync_playlists.py all' to sync from Spotify."
+        
+        result = f"📚 {len(playlists)} available playlists:\n"
+        result += "-" * 40 + "\n"
+        
+        for i, playlist in enumerate(playlists[:20], 1):  # Show first 20
+            result += f"{i:2d}. {playlist['name']} ({playlist['track_count']} tracks)\n"
+            if playlist['description']:
+                result += f"    {playlist['description'][:50]}...\n"
+        
+        if len(playlists) > 20:
+            result += f"\n... and {len(playlists) - 20} more playlists"
+        
+        return result
+    
+    def next_track(self) -> str:
+        """Skip to the next track using AppleScript"""
+        print("⏭️ Skipping to next track...")
+        
+        script = 'tell application "Spotify" to next track'
+        result = self.run_applescript(script)
+        
+        if "❌" in result:
+            return f"❌ Failed to skip to next track: {result}"
+        
+        # Give it a moment to change tracks, then get the new track info
+        time.sleep(2)
+        current = self.get_current_track()
+        if current.get("status") == "playing":
+            return f"⏭️ Skipped to: {current['name']} by {current['artist']}"
+        else:
+            return f"⏭️ Skipped to next track (status: {current.get('status', 'Unknown')})"
+    
+    def previous_track(self) -> str:
+        """Skip to the previous track using AppleScript"""
+        print("⏮️ Skipping to previous track...")
+        
+        script = 'tell application "Spotify" to previous track'
+        result = self.run_applescript(script)
+        
+        if "❌" in result:
+            return f"❌ Failed to skip to previous track: {result}"
+        
+        # Give it a moment to change tracks, then get the new track info
+        time.sleep(2)
+        current = self.get_current_track()
+        if current.get("status") == "playing":
+            return f"⏮️ Skipped to: {current['name']} by {current['artist']}"
+        else:
+            return f"⏮️ Skipped to previous track (status: {current.get('status', 'Unknown')})"
+    
+    def pause_playback(self) -> str:
+        """Pause playback using AppleScript"""
+        print("⏸️ Pausing playback...")
+        
+        script = 'tell application "Spotify" to pause'
+        result = self.run_applescript(script)
+        
+        if "❌" in result:
+            return f"❌ Failed to pause: {result}"
+        
+        return "⏸️ Playback paused"
+    
+    def resume_playback(self) -> str:
+        """Resume playback using AppleScript"""
+        print("▶️ Resuming playback...")
+        
+        script = 'tell application "Spotify" to play'
+        result = self.run_applescript(script)
+        
+        if "❌" in result:
+            return f"❌ Failed to resume: {result}"
+        
+        # Get current track info
+        time.sleep(1)
+        current = self.get_current_track()
+        if current.get("status") == "playing":
+            return f"▶️ Resumed: {current['name']} by {current['artist']}"
+        else:
+            return "▶️ Playback resumed"
+    
     def get_track_lyrics(self, artist: str, song: str) -> Optional[str]:
         """
         Get lyrics for a song using web APIs with timeout
@@ -801,6 +1250,19 @@ class ComprehensiveMusicAgent:
             else:
                 return "❌ No track currently playing to sync"
         
+        # Handle playback control commands
+        elif "next track" in command_lower or "skip" in command_lower or "next" in command_lower:
+            return self.next_track()
+        
+        elif "previous track" in command_lower or "back" in command_lower or "previous" in command_lower:
+            return self.previous_track()
+        
+        elif "pause" in command_lower:
+            return self.pause_playback()
+        
+        elif "resume" in command_lower or "unpause" in command_lower:
+            return self.resume_playback()
+        
         # Handle "what's playing"
         elif "what's playing" in command_lower or "current track" in command_lower:
             current = self.get_current_track()
@@ -859,6 +1321,196 @@ class ComprehensiveMusicAgent:
                 return result.strip()
             else:
                 return "ℹ️ You haven't liked any artists yet. Try 'like john hiatt' or 'I like this artist'"
+        
+        # Handle tagging commands
+        elif "tag this" in command_lower or "add tag" in command_lower:
+            current = self.get_current_track()
+            if current.get("status") != "playing":
+                return "❌ No track currently playing to tag"
+            
+            # Extract tag from command
+            import re
+            patterns = [
+                r'tag this (?:as |with )?"([^"]+)"',  # "tag this as "high energy""
+                r'tag this (?:as |with )?(.+)',        # "tag this as high energy"
+                r'add tag "([^"]+)"',                   # "add tag "high energy""
+                r'add tag (.+)'                        # "add tag high energy"
+            ]
+            
+            tag_text = None
+            for pattern in patterns:
+                match = re.search(pattern, command_lower)
+                if match:
+                    tag_text = match.group(1).strip()
+                    break
+            
+            if not tag_text:
+                return "❌ Could not extract tag. Try 'tag this as high energy' or 'add tag \"workout music\"'"
+            
+            # Determine tag category (mood, genre, energy, etc.)
+            tag_category = 'mood'  # Default
+            energy_words = ['energy', 'energetic', 'pump', 'intense', 'powerful', 'driving']
+            genre_words = ['rock', 'jazz', 'electronic', 'pop', 'classical', 'hip hop', 'country', 'blues', 'metal', 'punk', 'folk']
+            mood_words = ['happy', 'sad', 'mellow', 'chill', 'upbeat', 'relaxing', 'peaceful', 'aggressive', 'romantic', 'nostalgic']
+            
+            if any(word in tag_text.lower() for word in energy_words):
+                tag_category = 'energy'
+            elif any(word in tag_text.lower() for word in genre_words):
+                tag_category = 'genre'
+            elif any(word in tag_text.lower() for word in mood_words):
+                tag_category = 'mood'
+            
+            # Add tag to current track
+            success = self.db.add_tag('track', current['name'], tag_category, tag_text, added_by='user')
+            if success:
+                return f"🏷️ Tagged '{current['name']}' by {current['artist']} as: {tag_text}"
+            else:
+                return f"❌ Failed to add tag"
+        
+        # Handle "show tags" command
+        elif "show tags" in command_lower or "what tags" in command_lower:
+            current = self.get_current_track()
+            if current.get("status") != "playing":
+                return "❌ No track currently playing to show tags for"
+            
+            tags = self.db.get_tags_for_entity('track', current['name'])
+            if tags:
+                result = f"🏷️ Tags for '{current['name']}' by {current['artist']}:\n"
+                for tag in tags:
+                    result += f"  • {tag['category']}: {tag['value']} (added {tag['added_date'][:10]})\n"
+                return result.strip()
+            else:
+                return f"🏷️ No tags found for '{current['name']}' by {current['artist']}"
+        
+        # Handle "find songs tagged" command
+        elif "find songs tagged" in command_lower or "play songs tagged" in command_lower:
+            import re
+            patterns = [
+                r'(?:find|play) songs tagged (?:as |with )?"([^"]+)"',
+                r'(?:find|play) songs tagged (?:as |with )?(.+)'
+            ]
+            
+            tag_text = None
+            for pattern in patterns:
+                match = re.search(pattern, command_lower)
+                if match:
+                    tag_text = match.group(1).strip()
+                    break
+            
+            if not tag_text:
+                return "❌ Could not extract tag. Try 'find songs tagged high energy'"
+            
+            # Search for tracks with this tag
+            tracks = self.db.get_entities_by_tag('mood', tag_text, 'track')
+            if not tracks:
+                tracks = self.db.get_entities_by_tag('energy', tag_text, 'track')
+            if not tracks:
+                tracks = self.db.get_entities_by_tag('genre', tag_text, 'track')
+            
+            if tracks:
+                if "play" in command_lower:
+                    # Play the first/highest confidence track
+                    track = tracks[0]
+                    # Try to find and play the track
+                    found_track = self.search_track_fuzzy(track['entity_name'])
+                    if found_track:
+                        success = self.play_track(found_track['uri'])
+                        if success:
+                            return f"🎵 Playing '{tag_text}' tagged song: {found_track['name']} by {found_track['artist']}"
+                        else:
+                            return f"❌ Failed to play {found_track['name']}"
+                    else:
+                        return f"❌ Could not find track: {track['entity_name']}"
+                else:
+                    # Just list the tracks
+                    result = f"🏷️ Songs tagged '{tag_text}':\n"
+                    for i, track in enumerate(tracks[:10], 1):
+                        result += f"{i}. {track['entity_name']} (confidence: {track['confidence']:.1f})\n"
+                    return result.strip()
+            else:
+                return f"❌ No songs found with tag: '{tag_text}'"
+        
+        
+        # Handle "shuffle" commands
+        elif "shuffle" in command_lower and ("liked songs" in command_lower or "my liked" in command_lower):
+            success = self.shuffle_liked_songs()
+            if success:
+                return "🔀 Now shuffling your liked songs!"
+            else:
+                return "❌ Could not access your liked songs. Make sure you're authenticated with Spotify."
+        
+        elif "shuffle" in command_lower and "playlist" in command_lower:
+            # Extract playlist name
+            import re
+            patterns = [
+                r'shuffle playlist (.+)',
+                r'shuffle (.+?) playlist',
+                r'shuffle (.+)'
+            ]
+            
+            playlist_name = None
+            for pattern in patterns:
+                match = re.search(pattern, command_lower)
+                if match:
+                    playlist_name = match.group(1).strip()
+                    # Skip words that don't look like playlist names
+                    if playlist_name not in ['playlist', 'the', 'my']:
+                        break
+            
+            if playlist_name:
+                success = self.shuffle_playlist_by_name(playlist_name)
+                if success:
+                    return f"🔀 Now shuffling playlist: {playlist_name}"
+                else:
+                    return f"❌ Could not find or shuffle playlist: '{playlist_name}'"
+            else:
+                return "❌ Please specify a playlist name. Try 'shuffle my favorites playlist'"
+        
+        # Handle playlist commands
+        elif "list playlists" in command_lower or "show playlists" in command_lower:
+            return self.list_playlists()
+        
+        elif "play playlist" in command_lower or "play the playlist" in command_lower:
+            # Extract playlist name
+            playlist_name = command_lower.replace("play playlist", "").replace("play the playlist", "").strip()
+            if playlist_name:
+                success = self.play_playlist_by_name(playlist_name)
+                if success:
+                    return f"🎵 Now playing playlist: {playlist_name}"
+                else:
+                    return f"❌ Could not find or play playlist: '{playlist_name}'"
+            else:
+                return "❌ Please specify a playlist name. Try 'play playlist my favorites'"
+        
+        elif "random from" in command_lower:
+            # Extract playlist name from various "random from [name]" patterns
+            import re
+            patterns = [
+                r'random from (.+?) playlist',
+                r'random from playlist (.+)',
+                r'play random from (.+?) playlist', 
+                r'play random from playlist (.+)',
+                r'random from (.+)',  # More flexible - just "random from [name]"
+                r'play random from (.+)'
+            ]
+            
+            playlist_name = None
+            for pattern in patterns:
+                match = re.search(pattern, command_lower)
+                if match:
+                    playlist_name = match.group(1).strip()
+                    # Skip if it looks like a tag-based request
+                    if not any(word in playlist_name for word in ['music', 'song', 'track']):
+                        break
+            
+            if playlist_name:
+                success = self.play_random_from_playlist(playlist_name)
+                if success:
+                    return f"🎲 Playing random track from playlist: {playlist_name}"
+                else:
+                    return f"❌ Could not find tracks in playlist: '{playlist_name}'"
+            else:
+                return "❌ Please specify a playlist name. Try 'random from odesza' or 'random from my favorites playlist'"
         
         # Handle "what kind of music is this" or "what genre is this"
         elif any(phrase in command_lower for phrase in ["what kind of music", "what genre", "what style", "describe this music"]):
@@ -983,7 +1635,7 @@ class ComprehensiveMusicAgent:
             else:
                 return "❌ No track currently playing"
         
-        return f"❓ I don't understand: '{command}'\n\nTry:\n• play high hopes pink floyd\n• play me some enya\n• what's that song where they say 'encumbered forever'\n• what's playing\n• search for bohemian rhapsody\n• lyrics"
+        return f"❓ I don't understand: '{command}'\n\nTry:\n• play high hopes pink floyd\n• play me some enya\n• next track / skip\n• previous track / back\n• pause / resume\n• what's playing\n• what's that song where they say 'encumbered forever'\n• search for bohemian rhapsody\n• lyrics"
 
 def main():
     """Test the comprehensive music agent"""

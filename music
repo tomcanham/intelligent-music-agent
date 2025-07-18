@@ -1,20 +1,32 @@
 #!/bin/bash
 # Music Agent Convenience Wrapper
-# Automatically activates the virtual environment and runs music commands
+# Uses the dedicated virtual environment and provides easy shell access
 
-VENV_PATH="/Users/tom/src/heck/.venv"
-SCRIPT_DIR="/Users/tom/scripts/slack"
+# Get the real script directory, following symlinks
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+VENV_PATH="$SCRIPT_DIR/music_env"
+PYTHON_BIN="$VENV_PATH/bin/python3"
 
-# Function to run with venv
-run_with_venv() {
-    source "$VENV_PATH/bin/activate" && cd "$SCRIPT_DIR" && "$@"
+# Function to run music commands
+run_music_command() {
+    cd "$SCRIPT_DIR" && "$PYTHON_BIN" music_client.py "$@"
 }
 
+# Function to run daemon commands
+run_daemon_command() {
+    cd "$SCRIPT_DIR" && "$PYTHON_BIN" music_daemon.py "$@"
+}
 # Check if daemon is running
 check_daemon() {
-    if ! run_with_venv python3 music_daemon.py --status >/dev/null 2>&1; then
+    if ! run_daemon_command --status > /dev/null 2>&1; then
         echo "🚀 Starting music daemon..."
-        run_with_venv python3 music_daemon.py --daemon
+        run_daemon_command --daemon
         sleep 2
         echo "✅ Music daemon started"
     fi
@@ -24,20 +36,20 @@ check_daemon() {
 case "$1" in
     "start")
         echo "🚀 Starting music daemon..."
-        run_with_venv python3 music_daemon.py --daemon
+        run_daemon_command --daemon
         ;;
     "stop")
         echo "⏹️  Stopping music daemon..."
-        run_with_venv python3 music_daemon.py --stop
+        run_daemon_command --stop
         ;;
     "status")
-        run_with_venv python3 music_daemon.py --status
+        run_daemon_command --status
         ;;
     "restart")
         echo "🔄 Restarting music daemon..."
-        run_with_venv python3 music_daemon.py --stop
+        run_daemon_command --stop
         sleep 2
-        run_with_venv python3 music_daemon.py --daemon
+        run_daemon_command --daemon
         ;;
     "")
         echo "🎵 Music Agent Commands:"
@@ -45,18 +57,21 @@ case "$1" in
         echo "  music stop        - Stop the daemon"
         echo "  music status      - Show daemon status"
         echo "  music restart     - Restart the daemon"
-        echo "  music '<command>' - Send music command"
+        echo "  music <command>   - Send music command"
         echo ""
         echo "🎶 Music Commands:"
-        echo "  music 'play bohemian rhapsody'"
-        echo "  music 'what's playing'"
-        echo "  music 'play me some pink floyd'"
-        echo "  music 'play some mellow music'"
-        echo "  music 'search for stairway to heaven'"
+        echo "  music play bohemian rhapsody"
+        echo "  music skip / next track"
+        echo "  music previous track / back"
+        echo "  music pause / resume"
+        echo "  music what's playing"
+        echo "  music play me some pink floyd"
+        echo "  music play some mellow music"
+        echo "  music search for stairway to heaven"
         ;;
     *)
         # Any other command is assumed to be a music command
         check_daemon
-        run_with_venv python3 music_client.py "$@"
+        run_music_command "$@"
         ;;
 esac

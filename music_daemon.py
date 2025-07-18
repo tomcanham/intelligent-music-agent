@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/Users/tom/scripts/slack/music_env/bin/python3
 """
 Music Agent Daemon
 Background service that handles music commands via Unix socket communication

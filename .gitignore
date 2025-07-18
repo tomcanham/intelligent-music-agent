@@ -8,6 +8,7 @@ __pycache__/
 venv/
 env/
 ENV/
+music_env/
 
 # IDE/Editor files
 .vscode/
@@ -45,3 +46,5 @@ logs/
 *.pem
 *.key
 *.crt
+.spotify_credentials
+.spotify_token_cache
