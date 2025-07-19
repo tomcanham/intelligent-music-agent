@@ -128,6 +128,27 @@ class MusicDatabase:
                     )
                 ''')
                 
+                # Table for musical relationships
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS musical_relationships (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        source_type TEXT NOT NULL,       -- 'track', 'album', 'artist'
+                        source_name TEXT NOT NULL,       -- Name of source entity
+                        source_artist TEXT,              -- Artist if source is track/album
+                        source_id TEXT,                  -- Spotify URI or other ID
+                        target_type TEXT NOT NULL,       -- 'track', 'album', 'artist'
+                        target_name TEXT NOT NULL,       -- Name of target entity
+                        target_artist TEXT,              -- Artist if target is track/album
+                        target_id TEXT,                  -- Spotify URI or other ID
+                        relationship_type TEXT NOT NULL, -- 'remix_of', 'cover_of', 'influenced_by', 'sampled_by', 'similar_to', etc.
+                        confidence REAL DEFAULT 1.0,    -- How confident we are in this relationship
+                        notes TEXT,                      -- Optional human notes
+                        added_date TEXT NOT NULL,
+                        added_by TEXT DEFAULT 'user',   -- 'user', 'system', 'api'
+                        UNIQUE(source_type, source_name, source_artist, target_type, target_name, target_artist, relationship_type)
+                    )
+                ''')                
+                
                 # Table for user preferences
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS preferences (
@@ -546,6 +567,122 @@ class MusicDatabase:
         except Exception as e:
             print(f"❌ Error getting playlist tracks: {e}")
             return []
+    
+    # Musical relationships methods
+    def add_relationship(self, source_type: str, source_name: str, source_artist: str,
+                        target_type: str, target_name: str, target_artist: str, 
+                        relationship_type: str, notes: str = None, confidence: float = 1.0,
+                        source_id: str = None, target_id: str = None, added_by: str = 'user') -> bool:
+        """Add a musical relationship between two entities"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO musical_relationships 
+                    (source_type, source_name, source_artist, source_id,
+                     target_type, target_name, target_artist, target_id,
+                     relationship_type, confidence, notes, added_date, added_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+                ''', (source_type, source_name, source_artist, source_id,
+                      target_type, target_name, target_artist, target_id,
+                      relationship_type, confidence, notes, added_by))
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"❌ Error adding relationship: {e}")
+            return False
+    
+    def get_relationships_for_entity(self, entity_type: str, entity_name: str, entity_artist: str = None) -> List[Dict[str, Any]]:
+        """Get all relationships for a specific entity (as source or target)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get relationships where this entity is the source
+                cursor.execute('''
+                    SELECT target_type, target_name, target_artist, relationship_type, 
+                           confidence, notes, added_date, added_by, 'outgoing' as direction
+                    FROM musical_relationships
+                    WHERE source_type = ? AND source_name = ? AND 
+                          (source_artist = ? OR source_artist IS NULL OR ? IS NULL)
+                    
+                    UNION ALL
+                    
+                    SELECT source_type, source_name, source_artist, relationship_type,
+                           confidence, notes, added_date, added_by, 'incoming' as direction
+                    FROM musical_relationships
+                    WHERE target_type = ? AND target_name = ? AND 
+                          (target_artist = ? OR target_artist IS NULL OR ? IS NULL)
+                    
+                    ORDER BY added_date DESC
+                ''', (entity_type, entity_name, entity_artist, entity_artist,
+                      entity_type, entity_name, entity_artist, entity_artist))
+                
+                return [{
+                    'related_type': row[0],
+                    'related_name': row[1], 
+                    'related_artist': row[2],
+                    'relationship_type': row[3],
+                    'confidence': row[4],
+                    'notes': row[5],
+                    'added_date': row[6],
+                    'added_by': row[7],
+                    'direction': row[8]
+                } for row in cursor.fetchall()]
+                
+        except Exception as e:
+            print(f"❌ Error getting relationships: {e}")
+            return []
+    
+    def get_relationships_by_type(self, relationship_type: str) -> List[Dict[str, Any]]:
+        """Get all relationships of a specific type"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT source_type, source_name, source_artist,
+                           target_type, target_name, target_artist,
+                           relationship_type, confidence, notes, added_date
+                    FROM musical_relationships
+                    WHERE relationship_type = ?
+                    ORDER BY added_date DESC
+                ''', (relationship_type,))
+                
+                return [{
+                    'source_type': row[0],
+                    'source_name': row[1],
+                    'source_artist': row[2],
+                    'target_type': row[3],
+                    'target_name': row[4],
+                    'target_artist': row[5],
+                    'relationship_type': row[6],
+                    'confidence': row[7],
+                    'notes': row[8],
+                    'added_date': row[9]
+                } for row in cursor.fetchall()]
+                
+        except Exception as e:
+            print(f"❌ Error getting relationships by type: {e}")
+            return []
+    
+    # Convenience methods for common relationship types
+    def add_remix_relationship(self, remix_name: str, remix_artist: str, original_name: str, original_artist: str, notes: str = None) -> bool:
+        """Add a remix relationship"""
+        return self.add_relationship('track', remix_name, remix_artist, 
+                                   'track', original_name, original_artist, 
+                                   'remix_of', notes)
+    
+    def add_cover_relationship(self, cover_name: str, cover_artist: str, original_name: str, original_artist: str, notes: str = None) -> bool:
+        """Add a cover relationship"""
+        return self.add_relationship('track', cover_name, cover_artist,
+                                   'track', original_name, original_artist,
+                                   'cover_of', notes)
+    
+    def add_influence_relationship(self, influenced_name: str, influenced_artist: str, influencer_name: str, influencer_artist: str, notes: str = None) -> bool:
+        """Add an influence relationship"""
+        return self.add_relationship('track', influenced_name, influenced_artist,
+                                   'track', influencer_name, influencer_artist,
+                                   'influenced_by', notes)
 
 class ComprehensiveMusicAgent:
     """
@@ -1622,6 +1759,76 @@ class ComprehensiveMusicAgent:
                 return f"🎵 Found: {track['name']} by {track['artist']} from {track['album']}"
             else:
                 return f"❌ Could not find: '{query}'"
+        
+        # Handle relationship commands
+        elif "add relationship" in command_lower or "this is" in command_lower:
+            current = self.get_current_track()
+            if current.get("status") != "playing":
+                return "❌ No track currently playing to add relationship for"
+            
+            # Parse relationship patterns
+            import re
+            patterns = [
+                r'this is (?:a )?remix of ([^"]+) by ([^"]+)',
+                r'this is (?:a )?cover of ([^"]+) by ([^"]+)',
+                r'this (?:was )?influenced by ([^"]+) by ([^"]+)',
+                r'add relationship this is remix of ([^"]+) by ([^"]+)',
+                r'add relationship this is cover of ([^"]+) by ([^"]+)',
+            ]
+            
+            relationship_type = None
+            target_name = None
+            target_artist = None
+            
+            for pattern in patterns:
+                match = re.search(pattern, command_lower)
+                if match:
+                    target_name = match.group(1).strip()
+                    target_artist = match.group(2).strip()
+                    
+                    if "remix" in pattern:
+                        relationship_type = "remix_of"
+                    elif "cover" in pattern:
+                        relationship_type = "cover_of"
+                    elif "influenced" in pattern:
+                        relationship_type = "influenced_by"
+                    break
+            
+            if not (relationship_type and target_name and target_artist):
+                return "❌ Could not parse relationship. Try: 'this is remix of sweet home alabama by lynyrd skynyrd'"
+            
+            # Add the relationship
+            success = self.db.add_relationship(
+                source_type='track',
+                source_name=current['name'],
+                source_artist=current['artist'],
+                target_type='track', 
+                target_name=target_name,
+                target_artist=target_artist,
+                relationship_type=relationship_type,
+                notes=f"Added via voice command: {command}"
+            )
+            
+            if success:
+                return f"🔗 Added relationship: '{current['name']}' by {current['artist']} is {relationship_type.replace('_', ' ')} '{target_name}' by {target_artist}"
+            else:
+                return "❌ Failed to add relationship"
+        
+        # Handle "show relationships" command  
+        elif "show relationships" in command_lower or "what relationships" in command_lower:
+            current = self.get_current_track()
+            if current.get("status") != "playing":
+                return "❌ No track currently playing to show relationships for"
+            
+            relationships = self.db.get_relationships_for_entity('track', current['name'], current['artist'])
+            if relationships:
+                result = f"🔗 Relationships for '{current['name']}' by {current['artist']}:\n"
+                for rel in relationships:
+                    direction = "➡️" if rel['direction'] == 'outgoing' else "⬅️"
+                    result += f"  {direction} {rel['relationship_type'].replace('_', ' ')}: {rel['related_name']} by {rel['related_artist']}\n"
+                return result.strip()
+            else:
+                return f"🔗 No relationships found for '{current['name']}' by {current['artist']}"
         
         # Handle lyrics requests
         elif "lyrics" in command_lower:

@@ -28,6 +28,7 @@ music_env/
 .music_agent.db
 .music_agent.sock
 .music_agent.log
+.music_agent.pid
 .music_agent/
 
 # Environment variables

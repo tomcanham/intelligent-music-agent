@@ -58,6 +58,14 @@ class MusicAgentConfig:
         return str(self.data_dir / 'music_agent.log')
     
     @property
+    def pid_path(self) -> str:
+        """Path to the PID file"""
+        pid_path = os.getenv('MUSIC_AGENT_PID_PATH')
+        if pid_path:
+            return str(Path(pid_path).expanduser())
+        return str(self.data_dir / 'music_agent.pid')
+    
+    @property
     def credentials_file(self) -> str:
         """Path to the Spotify credentials file"""
         creds_path = os.getenv('MUSIC_AGENT_CREDENTIALS')

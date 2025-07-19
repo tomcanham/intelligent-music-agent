@@ -57,12 +57,22 @@ def install_dependencies():
     try:
         for req in requirements:
             print(f"Installing {req}...")
-            subprocess.run([sys.executable, "-m", "pip", "install", req], 
-                         check=True, capture_output=True)
+            result = subprocess.run([sys.executable, "-m", "pip", "install", req], 
+                                  capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                # Check if it's already satisfied
+                if "already satisfied" in result.stdout.lower() or "already satisfied" in result.stderr.lower():
+                    print(f"  ✅ {req} already installed")
+                else:
+                    print(f"  ❌ Failed to install {req}: {result.stderr}")
+                    return False
+            else:
+                print(f"  ✅ {req} installed")
         
-        print("✅ Dependencies installed successfully")
+        print("✅ Dependencies ready")
         return True
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         print(f"❌ Failed to install dependencies: {e}")
         return False
 

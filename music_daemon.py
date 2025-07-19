@@ -33,6 +33,7 @@ class MusicDaemon:
             socket_path = self.config.socket_path
         
         self.socket_path = socket_path
+        self.pid_path = self.config.pid_path
         self.running = False
         self.sock = None
         self.music_agent = None
@@ -46,6 +47,12 @@ class MusicDaemon:
         
         # Set up logging
         log_path = self.config.log_path
+        
+        # Clear existing handlers to prevent duplicates
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+            
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
@@ -61,6 +68,59 @@ class MusicDaemon:
         signal.signal(signal.SIGTERM, self._signal_handler)
         
         self.logger.info(f"Music Daemon initialized - Socket: {self.socket_path}")
+    
+    def _write_pid_file(self) -> bool:
+        """Write the current process ID to the PID file"""
+        try:
+            with open(self.pid_path, 'w') as f:
+                f.write(str(os.getpid()))
+            self.logger.info(f"PID file written: {self.pid_path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to write PID file: {e}")
+            return False
+    
+    def _remove_pid_file(self) -> bool:
+        """Remove the PID file"""
+        try:
+            if os.path.exists(self.pid_path):
+                os.unlink(self.pid_path)
+                self.logger.info(f"Removed PID file: {self.pid_path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to remove PID file: {e}")
+            return False
+    
+    def _is_process_running(self, pid: int) -> bool:
+        """Check if a process with the given PID is running"""
+        try:
+            os.kill(pid, 0)  # Send signal 0 to check if process exists
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+    
+    def _check_existing_instance(self) -> bool:
+        """Check if another instance is already running using PID file"""
+        if not os.path.exists(self.pid_path):
+            return False
+        
+        try:
+            with open(self.pid_path, 'r') as f:
+                pid = int(f.read().strip())
+            
+            if self._is_process_running(pid):
+                self.logger.warning(f"Another music daemon is already running (PID: {pid})")
+                return True
+            else:
+                # Stale PID file - remove it
+                self.logger.info(f"Removing stale PID file (PID {pid} not running)")
+                self._remove_pid_file()
+                return False
+                
+        except (ValueError, IOError) as e:
+            self.logger.warning(f"Invalid PID file, removing: {e}")
+            self._remove_pid_file()
+            return False
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
@@ -201,14 +261,21 @@ class MusicDaemon:
         """Start the daemon"""
         self.logger.info("Starting Music Daemon...")
         
+        # Write PID file
+        if not self._write_pid_file():
+            self.logger.error("Failed to write PID file")
+            return False
+        
         # Initialize music agent
         if not self._init_music_agent():
             self.logger.error("Failed to initialize music agent")
+            self._remove_pid_file()
             return False
         
         # Set up socket
         if not self._setup_socket():
             self.logger.error("Failed to set up socket")
+            self._remove_pid_file()
             return False
         
         self.running = True
@@ -263,6 +330,9 @@ class MusicDaemon:
                 self.logger.info(f"Removed socket file: {self.socket_path}")
             except:
                 pass
+        
+        # Remove PID file
+        self._remove_pid_file()
         
         self.logger.info("Music Daemon stopped")
     
@@ -408,8 +478,8 @@ def main():
             print("Daemon is not running")
         return
     
-    # Check if already running
-    if daemon.is_running():
+    # Check if already running using PID file
+    if daemon._check_existing_instance():
         print("Music daemon is already running")
         return
     
