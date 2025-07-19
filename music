@@ -10,8 +10,15 @@ while [ -h "$SOURCE" ]; do
     [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-VENV_PATH="$SCRIPT_DIR/music_env"
-PYTHON_BIN="$VENV_PATH/bin/python3"
+
+# Try to find the best Python executable
+if [ -f "$SCRIPT_DIR/music_env/bin/python3" ]; then
+    PYTHON_BIN="$SCRIPT_DIR/music_env/bin/python3"
+elif [ -n "$MUSIC_AGENT_PYTHON" ]; then
+    PYTHON_BIN="$MUSIC_AGENT_PYTHON"
+else
+    PYTHON_BIN="python3"
+fi
 
 # Function to run music commands
 run_music_command() {

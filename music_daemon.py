@@ -1,4 +1,4 @@
-#!/Users/tom/scripts/slack/music_env/bin/python3
+#!/usr/bin/env python3
 """
 Music Agent Daemon
 Background service that handles music commands via Unix socket communication
@@ -19,6 +19,7 @@ from datetime import datetime
 
 # Import the existing music agent functionality
 from music_agent import ComprehensiveMusicAgent
+from config import get_config
 
 class MusicDaemon:
     """
@@ -26,14 +27,16 @@ class MusicDaemon:
     """
     
     def __init__(self, socket_path: str = None):
+        self.config = get_config()
+        
         if socket_path is None:
-            socket_path = str(Path.home() / ".music_agent.sock")
+            socket_path = self.config.socket_path
         
         self.socket_path = socket_path
         self.running = False
         self.sock = None
         self.music_agent = None
-        self.db_path = str(Path.home() / ".music_agent.db")
+        self.db_path = self.config.database_path
         
         # Auto-sync tracking
         self.auto_sync_enabled = True
@@ -42,7 +45,7 @@ class MusicDaemon:
         self.polling_thread = None
         
         # Set up logging
-        log_path = str(Path.home() / ".music_agent.log")
+        log_path = self.config.log_path
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
@@ -431,7 +434,7 @@ class MusicClient:
     
     def __init__(self, socket_path: str = None):
         if socket_path is None:
-            socket_path = str(Path.home() / ".music_agent.sock")
+            socket_path = get_config().socket_path
         self.socket_path = socket_path
     
     def send_command(self, command: str) -> Dict[str, Any]:

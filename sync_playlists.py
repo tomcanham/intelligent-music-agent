@@ -1,4 +1,4 @@
-#!/Users/tom/scripts/slack/music_env/bin/python3
+#!/usr/bin/env python3
 """
 Playlist Sync Script
 Fetches all user playlists from Spotify and stores them locally

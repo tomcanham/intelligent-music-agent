@@ -1,4 +1,4 @@
-#!/Users/tom/scripts/slack/music_env/bin/python3
+#!/usr/bin/env python3
 """
 Spotify OAuth Authentication Helper
 Handles the OAuth flow for the music agent to get full API access
@@ -9,6 +9,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import json
 from pathlib import Path
+from config import get_config
 
 class SpotifyAuth:
     """Handle Spotify OAuth authentication"""
@@ -23,7 +24,8 @@ class SpotifyAuth:
     def _load_credentials(self):
         """Load credentials from file or environment variables"""
         # Try to load from .spotify_credentials file first
-        creds_file = Path(__file__).parent / ".spotify_credentials"
+        config = get_config()
+        creds_file = Path(config.credentials_file)
         
         if creds_file.exists():
             with open(creds_file, 'r') as f:

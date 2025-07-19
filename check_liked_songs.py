@@ -1,4 +1,4 @@
-#!/Users/tom/scripts/slack/music_env/bin/python3
+#!/usr/bin/env python3
 """
 Quick script to check user's liked songs
 """

@@ -25,9 +25,10 @@ music_env/
 .Trashes
 
 # Music agent runtime files
-.music_agent.sock
 .music_agent.db
+.music_agent.sock
 .music_agent.log
+.music_agent/
 
 # Environment variables
 .env

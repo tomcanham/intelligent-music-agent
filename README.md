@@ -233,11 +233,35 @@ This provides detailed information including:
 - Genres (auto-tagged)
 - Audio characteristics (energy, mood, tempo, danceability) *when available*
 
-## Database Location
+## Configuration & File Locations
 
-- **Database**: `~/.music_agent.db`
-- **Socket**: `~/.music_agent.sock`
-- **Logs**: `~/.music_agent.log`
+The music agent uses configurable file locations that can be customized via environment variables:
+
+### Default Locations
+- **Data Directory**: `~/.music_agent/`
+- **Database**: `~/.music_agent/music_agent.db`
+- **Socket**: `~/.music_agent/music_agent.sock`
+- **Logs**: `~/.music_agent/music_agent.log`
+- **Credentials**: `<repo>/.spotify_credentials`
+
+### Environment Variables
+You can customize file locations using these environment variables:
+
+- `MUSIC_AGENT_DATA_DIR` - Base directory for all music agent data
+- `MUSIC_AGENT_DB_PATH` - Specific database file path
+- `MUSIC_AGENT_SOCKET_PATH` - Unix socket path
+- `MUSIC_AGENT_LOG_PATH` - Log file path
+- `MUSIC_AGENT_CREDENTIALS` - Spotify credentials file path
+- `MUSIC_AGENT_PYTHON` - Python executable to use
+
+### Example Configuration
+```bash
+# Use custom data directory
+export MUSIC_AGENT_DATA_DIR="~/Music/.music_agent"
+
+# Use system Python instead of virtual environment
+export MUSIC_AGENT_PYTHON="/usr/bin/python3"
+```
 
 ## API Limitations
 

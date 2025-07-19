@@ -1,4 +1,4 @@
-#!/Users/tom/scripts/slack/music_env/bin/python3
+#!/usr/bin/env python3
 """
 Comprehensive Music Agent
 Combines web search, AppleScript control, and all learned strategies for robust music handling
@@ -17,6 +17,7 @@ import time
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+from config import get_config
 
 class MusicDatabase:
     """
@@ -26,8 +27,8 @@ class MusicDatabase:
     
     def __init__(self, db_path: str = None):
         if db_path is None:
-            # Default to storing in user's home directory
-            db_path = str(Path.home() / ".music_agent.db")
+            # Use configurable path
+            db_path = get_config().database_path
         
         self.db_path = db_path
         self.init_database()

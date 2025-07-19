@@ -1,4 +1,4 @@
-#!/Users/tom/scripts/slack/music_env/bin/python3
+#!/usr/bin/env python3
 """
 Music Client
 Simple client for sending commands to the Music Daemon with auto-start functionality
